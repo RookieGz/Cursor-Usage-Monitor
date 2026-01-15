@@ -1,0 +1,89 @@
+{
+  "name": "cursor-usage",
+  "displayName": "Cursor Usage Monitor",
+  "description": "Monitor your Cursor account billing usage from VS Code.",
+  "version": "0.0.1",
+  "publisher": "zgz",
+  "engines": {
+    "vscode": "^1.86.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:cursorUsage.refresh"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cursorUsage.refresh",
+        "title": "Cursor Usage: Refresh"
+      },
+      {
+        "command": "cursorUsage.openSettings",
+        "title": "Cursor Usage: Open Settings"
+      }
+    ],
+    "configuration": {
+      "title": "Cursor Usage",
+      "properties": {
+        "cursorUsage.token": {
+          "type": "string",
+          "default": "",
+          "description": "WorkosCursorSessionToken value copied from your browser cookies.",
+          "scope": "machine"
+        },
+        "cursorUsage.email": {
+          "type": "string",
+          "default": "",
+          "description": "Cursor account email used for request metadata."
+        },
+        "cursorUsage.teamId": {
+          "type": "string",
+          "default": "14089613",
+          "description": "Cursor team ID used in the request payload."
+        },
+        "cursorUsage.refreshIntervalMinutes": {
+          "type": "number",
+          "default": 15,
+          "minimum": 1,
+          "description": "How often to refresh usage data."
+        },
+        "cursorUsage.showPercentage": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show usage percentage in the status bar."
+        },
+        "cursorUsage.showInStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Cursor usage in the status bar."
+        },
+        "cursorUsage.responseUsedField": {
+          "type": "string",
+          "default": "",
+          "description": "Dot path to the numeric usage field in the response (e.g. spendCents)."
+        },
+        "cursorUsage.responseLimitField": {
+          "type": "string",
+          "default": "",
+          "description": "Dot path to the numeric limit field in the response (optional)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.86.0",
+    "typescript": "^5.3.3",
+    "@vscode/vsce": "^3.0.0"
+  }
+}
