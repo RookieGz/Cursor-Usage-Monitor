@@ -22,10 +22,10 @@ A lightweight VS Code extension that monitors your Cursor billing usage and show
 2. Build: `npm run build`
 3. Press `F5` to launch the Extension Development Host.
 4. Configure settings in VS Code:
-   - `cursorUsage.token` (WorkosCursorSessionToken from your browser cookie; full cookie string also works)
    - `cursorUsage.email`
    - `cursorUsage.teamId` (defaults to `14089613`)
    - `cursorUsage.refreshIntervalMinutes`
+5. On first refresh, you'll be prompted for `WorkosCursorSessionToken` (stored in VS Code SecretStorage).
 
 ## Commands
 

@@ -15,6 +15,7 @@
     "onCommand:cursorUsage.refresh"
   ],
   "main": "./dist/extension.js",
+  "icon": "src/images/icon.png",
   "contributes": {
     "commands": [
       {
@@ -29,12 +30,6 @@
     "configuration": {
       "title": "Cursor Usage",
       "properties": {
-        "cursorUsage.token": {
-          "type": "string",
-          "default": "",
-          "description": "WorkosCursorSessionToken value copied from your browser cookies.",
-          "scope": "machine"
-        },
         "cursorUsage.email": {
           "type": "string",
           "default": "",

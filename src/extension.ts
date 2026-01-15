@@ -1,232 +1,293 @@
 /*
  * @Date: 2026-01-15 15:41:46
- * @LastEditTime: 2026-01-15 16:33:36
+ * @LastEditTime: 2026-01-15 17:50:45
  * @FilePath: /cursor-usage/src/extension.ts
  * @Description:
  *
  */
 
-import * as https from 'https';
-import * as vscode from 'vscode';
+import * as https from 'https'
+import * as vscode from 'vscode'
 
 type UsageResult = {
-  used?: number;
-  usedPath?: string;
-  raw: unknown;
-};
+  used?: number
+  usedPath?: string
+  raw: unknown
+}
 
 type UsageConfig = {
-  token: string;
-  email: string;
-  teamId: string;
-  refreshIntervalMinutes: number;
-};
+  email: string
+  teamId: string
+  refreshIntervalMinutes: number
+}
 
-const DEFAULT_TEAM_ID = '14089613';
-const OUTPUT_CHANNEL_NAME = 'Cursor Usage';
-const REQUEST_URL = 'https://cursor.com/api/dashboard/get-team-spend';
+type UsageCredentials = {
+  token: string
+  email: string
+  teamId: string
+}
 
-let statusBarItem: vscode.StatusBarItem | undefined;
-let refreshTimer: NodeJS.Timeout | undefined;
-let outputChannel: vscode.OutputChannel | undefined;
-let isRefreshing = false;
+const DEFAULT_TEAM_ID = '14089613'
+const OUTPUT_CHANNEL_NAME = 'Cursor Usage'
+const REQUEST_URL = 'https://cursor.com/api/dashboard/get-team-spend'
+const TOKEN_SECRET_KEY = 'cursorUsage.token'
+
+let statusBarItem: vscode.StatusBarItem | undefined
+let refreshTimer: NodeJS.Timeout | undefined
+let outputChannel: vscode.OutputChannel | undefined
+let isRefreshing = false
+let secretStorage: vscode.SecretStorage | undefined
 
 class RequestError extends Error {
-  statusCode: number;
-  body?: string;
+  statusCode: number
+  body?: string
 
   constructor(message: string, statusCode: number, body?: string) {
-    super(message);
-    this.name = 'RequestError';
-    this.statusCode = statusCode;
-    this.body = body;
+    super(message)
+    this.name = 'RequestError'
+    this.statusCode = statusCode
+    this.body = body
   }
 }
 
 class AuthError extends RequestError {
   constructor(message: string, statusCode: number, body?: string) {
-    super(message, statusCode, body);
-    this.name = 'AuthError';
+    super(message, statusCode, body)
+    this.name = 'AuthError'
   }
 }
 
 export function activate(context: vscode.ExtensionContext) {
-  outputChannel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
-  context.subscriptions.push(outputChannel);
+  outputChannel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME)
+  context.subscriptions.push(outputChannel)
+  secretStorage = context.secrets
 
-  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  statusBarItem.command = 'cursorUsage.refresh';
-  statusBarItem.text = 'Cursor: --';
-  statusBarItem.show();
-  context.subscriptions.push(statusBarItem);
+  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100)
+  statusBarItem.command = 'cursorUsage.refresh'
+  statusBarItem.text = 'Cursor: --'
+  statusBarItem.show()
+  context.subscriptions.push(statusBarItem)
 
-  void cleanupLegacySettings();
+  void cleanupLegacySettings()
+  void migrateLegacyToken()
 
   context.subscriptions.push(
     vscode.commands.registerCommand('cursorUsage.refresh', async () => {
-      await refreshUsage();
+      await refreshUsage()
     }),
     vscode.commands.registerCommand('cursorUsage.openSettings', () => {
-      void vscode.commands.executeCommand('workbench.action.openSettings', 'cursorUsage');
+      void vscode.commands.executeCommand('workbench.action.openSettings', 'cursorUsage')
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('cursorUsage')) {
-        scheduleRefresh();
+        scheduleRefresh()
       }
     })
-  );
+  )
 
-  scheduleRefresh();
-  void refreshUsage();
+  scheduleRefresh()
+  void refreshUsage()
 }
 
 export function deactivate() {
   if (refreshTimer) {
-    clearInterval(refreshTimer);
-    refreshTimer = undefined;
+    clearInterval(refreshTimer)
+    refreshTimer = undefined
   }
 }
 
 async function cleanupLegacySettings() {
-  const config = vscode.workspace.getConfiguration('cursorUsage');
-  const legacyKeys = [
-    'showPercentage',
-    'showInStatusBar',
-    'responseLimitField',
-    'responseUsedField'
-  ] as const;
+  const config = vscode.workspace.getConfiguration('cursorUsage')
+  const legacyKeys = ['showPercentage', 'showInStatusBar', 'responseLimitField', 'responseUsedField'] as const
 
   for (const key of legacyKeys) {
-    const inspection = config.inspect(key);
+    const inspection = config.inspect(key)
     if (!inspection) {
-      continue;
+      continue
     }
     if (inspection.globalValue !== undefined) {
-      await config.update(key, undefined, vscode.ConfigurationTarget.Global);
+      await config.update(key, undefined, vscode.ConfigurationTarget.Global)
     }
     if (inspection.workspaceValue !== undefined) {
-      await config.update(key, undefined, vscode.ConfigurationTarget.Workspace);
+      await config.update(key, undefined, vscode.ConfigurationTarget.Workspace)
     }
   }
 }
 
 function getConfig(): UsageConfig {
-  const config = vscode.workspace.getConfiguration('cursorUsage');
+  const config = vscode.workspace.getConfiguration('cursorUsage')
   return {
-    token: (config.get<string>('token') ?? '').trim(),
     email: (config.get<string>('email') ?? '').trim(),
     teamId: (config.get<string>('teamId') ?? DEFAULT_TEAM_ID).trim(),
-    refreshIntervalMinutes: config.get<number>('refreshIntervalMinutes', 15)
-  };
+    refreshIntervalMinutes: config.get<number>('refreshIntervalMinutes', 15),
+  }
+}
+
+async function migrateLegacyToken() {
+  await getStoredToken()
+}
+
+function getLegacyTokenFromSettings(): string {
+  const config = vscode.workspace.getConfiguration('cursorUsage')
+  return (config.get<string>('token') ?? '').trim()
+}
+
+async function clearLegacyTokenFromSettings(): Promise<void> {
+  const config = vscode.workspace.getConfiguration('cursorUsage')
+  const inspection = config.inspect<string>('token')
+  if (!inspection) {
+    return
+  }
+  if (inspection.globalValue !== undefined) {
+    await config.update('token', undefined, vscode.ConfigurationTarget.Global)
+  }
+  if (inspection.workspaceValue !== undefined) {
+    await config.update('token', undefined, vscode.ConfigurationTarget.Workspace)
+  }
+}
+
+async function getStoredToken(): Promise<string> {
+  const stored = (await secretStorage?.get(TOKEN_SECRET_KEY))?.trim() ?? ''
+  if (stored) {
+    return stored
+  }
+
+  const legacyToken = getLegacyTokenFromSettings()
+  if (!legacyToken) {
+    return ''
+  }
+
+  if (secretStorage) {
+    await secretStorage.store(TOKEN_SECRET_KEY, legacyToken)
+    await clearLegacyTokenFromSettings()
+    outputChannel?.appendLine('[info] Migrated Cursor token to SecretStorage.')
+  }
+
+  return legacyToken
 }
 
 function scheduleRefresh() {
   if (refreshTimer) {
-    clearInterval(refreshTimer);
-    refreshTimer = undefined;
+    clearInterval(refreshTimer)
+    refreshTimer = undefined
   }
 
-  const config = getConfig();
+  const config = getConfig()
   if (!config.refreshIntervalMinutes || config.refreshIntervalMinutes <= 0) {
-    return;
+    return
   }
 
   refreshTimer = setInterval(() => {
-    void refreshUsage();
-  }, config.refreshIntervalMinutes * 60 * 1000);
+    void refreshUsage()
+  }, config.refreshIntervalMinutes * 60 * 1000)
 }
 
 async function refreshUsage() {
   if (isRefreshing) {
-    return;
+    return
   }
-  isRefreshing = true;
+  isRefreshing = true
 
-  const config = getConfig();
-  statusBarItem?.show();
+  const config = getConfig()
+  statusBarItem?.show()
 
   try {
-    const credentials = await ensureCredentials(config);
+    const credentials = await ensureCredentials(config)
     if (!credentials) {
-      updateStatus('Cursor: missing settings', 'Missing Cursor credentials');
-      return;
+      updateStatus('Cursor: missing settings', 'Missing Cursor credentials')
+      return
     }
 
-    updateStatus('Cursor: loading...', 'Fetching Cursor usage...');
-    const response = await fetchUsage(credentials);
-    const usage = extractUsage(response, config);
-    renderUsage(usage, credentials.email, credentials.teamId);
+    updateStatus('Cursor: loading...', 'Fetching Cursor usage...')
+    const response = await fetchUsage(credentials)
+    const usage = extractUsage(response, config)
+    renderUsage(usage, credentials.email, credentials.teamId)
   } catch (error) {
     if (error instanceof AuthError) {
-      outputChannel?.appendLine(`[auth] ${error.message}`);
-      updateStatus('Cursor: token expired', error.message);
-      await handleAuthError(error.message);
-      return;
+      outputChannel?.appendLine(`[auth] ${error.message}`)
+      updateStatus('Cursor: token expired', error.message)
+      await handleAuthError(error.message)
+      return
     }
-    const message = error instanceof Error ? error.message : String(error);
-    outputChannel?.appendLine(`[error] ${message}`);
-    updateStatus('Cursor: error', message);
-    void vscode.window.showErrorMessage(`Cursor usage request failed: ${message}`);
+    const message = error instanceof Error ? error.message : String(error)
+    outputChannel?.appendLine(`[error] ${message}`)
+    updateStatus('Cursor: error', message)
+    void vscode.window.showErrorMessage(`Cursor usage request failed: ${message}`)
   } finally {
-    isRefreshing = false;
+    isRefreshing = false
   }
 }
 
-async function ensureCredentials(config: UsageConfig): Promise<{ token: string; email: string; teamId: string } | null> {
-  const section = vscode.workspace.getConfiguration('cursorUsage');
-  let { token, email, teamId } = config;
+async function ensureCredentials(config: UsageConfig): Promise<UsageCredentials | null> {
+  const section = vscode.workspace.getConfiguration('cursorUsage')
+  let token = await getStoredToken()
+  let { email, teamId } = config
 
   if (!token) {
-    token = (await vscode.window.showInputBox({
-      prompt: 'Enter your Cursor Workos session token',
-      placeHolder: 'WorkosCursorSessionToken value',
-      password: true,
-      ignoreFocusOut: true
-    }))?.trim() ?? '';
+    token =
+      (
+        await vscode.window.showInputBox({
+          prompt: 'Enter your Cursor Workos session token',
+          placeHolder: 'WorkosCursorSessionToken value',
+          password: true,
+          ignoreFocusOut: true,
+        })
+      )?.trim() ?? ''
     if (!token) {
-      return null;
+      return null
     }
-    await section.update('token', token, vscode.ConfigurationTarget.Global);
+    if (secretStorage) {
+      await secretStorage.store(TOKEN_SECRET_KEY, token)
+      await clearLegacyTokenFromSettings()
+    } else {
+      await section.update('token', token, vscode.ConfigurationTarget.Global)
+    }
   }
 
   if (!email) {
-    email = (await vscode.window.showInputBox({
-      prompt: 'Enter your Cursor account email',
-      placeHolder: 'name@example.com',
-      ignoreFocusOut: true
-    }))?.trim() ?? '';
+    email =
+      (
+        await vscode.window.showInputBox({
+          prompt: 'Enter your Cursor account email',
+          placeHolder: 'name@example.com',
+          ignoreFocusOut: true,
+        })
+      )?.trim() ?? ''
     if (!email) {
-      return null;
+      return null
     }
-    await section.update('email', email, vscode.ConfigurationTarget.Global);
+    await section.update('email', email, vscode.ConfigurationTarget.Global)
   }
 
   if (!teamId) {
-    teamId = (await vscode.window.showInputBox({
-      prompt: 'Enter your Cursor team ID',
-      placeHolder: DEFAULT_TEAM_ID,
-      value: DEFAULT_TEAM_ID,
-      ignoreFocusOut: true
-    }))?.trim() ?? '';
+    teamId =
+      (
+        await vscode.window.showInputBox({
+          prompt: 'Enter your Cursor team ID',
+          placeHolder: DEFAULT_TEAM_ID,
+          value: DEFAULT_TEAM_ID,
+          ignoreFocusOut: true,
+        })
+      )?.trim() ?? ''
     if (!teamId) {
-      return null;
+      return null
     }
-    await section.update('teamId', teamId, vscode.ConfigurationTarget.Global);
+    await section.update('teamId', teamId, vscode.ConfigurationTarget.Global)
   }
 
-  return { token, email, teamId };
+  return { token, email, teamId }
 }
 
 async function fetchUsage(credentials: { token: string; email: string; teamId: string }): Promise<unknown> {
-  const teamIdNumber = Number.parseInt(credentials.teamId, 10);
+  const teamIdNumber = Number.parseInt(credentials.teamId, 10)
   if (Number.isNaN(teamIdNumber)) {
-    throw new Error(`Invalid teamId: ${credentials.teamId}`);
+    throw new Error(`Invalid teamId: ${credentials.teamId}`)
   }
 
-  const body = JSON.stringify({ teamId: teamIdNumber });
-  let cookieHeader = credentials.token.trim();
+  const body = JSON.stringify({ teamId: teamIdNumber })
+  let cookieHeader = credentials.token.trim()
   if (!cookieHeader.toLowerCase().includes('workoscursorsessiontoken=')) {
-    cookieHeader = `WorkosCursorSessionToken=${cookieHeader}`;
+    cookieHeader = `WorkosCursorSessionToken=${cookieHeader}`
   }
 
   const headers: Record<string, string> = {
@@ -235,221 +296,214 @@ async function fetchUsage(credentials: { token: string; email: string; teamId: s
     Origin: 'https://cursor.com',
     Referer: 'https://cursor.com/cn/dashboard?tab=usage',
     'User-Agent': 'cursor-usage-vscode',
-    Cookie: cookieHeader
-  };
-
-  const response = await requestJson(REQUEST_URL, 'POST', headers, body);
-  const authIssue = detectAuthErrorResponse(response);
-  if (authIssue) {
-    throw new AuthError(`Authentication failed: ${authIssue}`, 200, JSON.stringify(response));
+    Cookie: cookieHeader,
   }
-  outputChannel?.appendLine(`[info] Response received at ${new Date().toISOString()}`);
-  outputChannel?.appendLine(JSON.stringify(response, null, 2));
-  return response;
+
+  const response = await requestJson(REQUEST_URL, 'POST', headers, body)
+  const authIssue = detectAuthErrorResponse(response)
+  if (authIssue) {
+    throw new AuthError(`Authentication failed: ${authIssue}`, 200, JSON.stringify(response))
+  }
+  outputChannel?.appendLine(`[info] Response received at ${new Date().toISOString()}`)
+  outputChannel?.appendLine(JSON.stringify(response, null, 2))
+  return response
 }
 
 function renderUsage(usage: UsageResult, email: string, teamId: string) {
-  const tooltip = new vscode.MarkdownString(
-    `Cursor usage\n\nEmail: ${email}\n\nTeam ID: ${teamId}`
-  );
-  tooltip.isTrusted = false;
+  const tooltip = new vscode.MarkdownString(`Cursor usage\n\nEmail: ${email}\n\nTeam ID: ${teamId}`)
+  tooltip.isTrusted = false
 
   if (usage.used === undefined) {
-    updateStatus('Cursor: no data', 'Unable to locate usage fields in response', tooltip);
-    return;
+    updateStatus('Cursor: no data', 'Unable to locate usage fields in response', tooltip)
+    return
   }
 
-  const usedText = formatValue(usage.used, usage.usedPath);
-  updateStatus(`Cursor: ${usedText}`, 'Usage updated', tooltip);
+  const usedText = formatValue(usage.used, usage.usedPath)
+  updateStatus(`Cursor: ${usedText}`, 'Usage updated', tooltip)
 }
 
 function updateStatus(text: string, tooltip?: string, markdownTooltip?: vscode.MarkdownString) {
   if (!statusBarItem) {
-    return;
+    return
   }
-  statusBarItem.text = text;
+  statusBarItem.text = text
   if (markdownTooltip) {
-    statusBarItem.tooltip = markdownTooltip;
+    statusBarItem.tooltip = markdownTooltip
   } else {
-    statusBarItem.tooltip = tooltip;
+    statusBarItem.tooltip = tooltip
   }
 }
 
-function requestJson(
-  urlString: string,
-  method: string,
-  headers: Record<string, string>,
-  body?: string
-): Promise<unknown> {
+function requestJson(urlString: string, method: string, headers: Record<string, string>, body?: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const url = new URL(urlString);
+    const url = new URL(urlString)
     const request = https.request(
       {
         method,
         hostname: url.hostname,
         path: `${url.pathname}${url.search}`,
-        headers
+        headers,
       },
       (response) => {
-        let data = '';
-        response.setEncoding('utf8');
+        let data = ''
+        response.setEncoding('utf8')
         response.on('data', (chunk) => {
-          data += chunk;
-        });
+          data += chunk
+        })
         response.on('end', () => {
-          const statusCode = response.statusCode ?? 0;
+          const statusCode = response.statusCode ?? 0
           if (statusCode === 401 || statusCode === 403) {
-            reject(new AuthError(`Authentication failed (${statusCode}). Token may be invalid.`, statusCode, data));
-            return;
+            reject(new AuthError(`Authentication failed (${statusCode}). Token may be invalid.`, statusCode, data))
+            return
           }
           if (statusCode < 200 || statusCode >= 300) {
-            reject(new RequestError(`Request failed (${statusCode}): ${data}`, statusCode, data));
-            return;
+            reject(new RequestError(`Request failed (${statusCode}): ${data}`, statusCode, data))
+            return
           }
 
           try {
-            resolve(JSON.parse(data));
+            resolve(JSON.parse(data))
           } catch (error) {
-            reject(new Error(`Failed to parse JSON: ${data}`));
+            reject(new Error(`Failed to parse JSON: ${data}`))
           }
-        });
+        })
       }
-    );
+    )
 
-    request.on('error', reject);
+    request.on('error', reject)
     if (body) {
-      request.write(body);
+      request.write(body)
     }
-    request.end();
-  });
+    request.end()
+  })
 }
 
 async function handleAuthError(message: string) {
-  const action = await vscode.window.showWarningMessage(
-    `Cursor token seems invalid or expired. ${message}`,
-    'Update Token',
-    'Open Settings'
-  );
+  const action = await vscode.window.showWarningMessage(`Cursor token seems invalid or expired. ${message}`, 'Update Token', 'Open Settings')
 
   if (action === 'Update Token') {
-    const token = (await vscode.window.showInputBox({
-      prompt: 'Enter your Cursor Workos session token',
-      placeHolder: 'WorkosCursorSessionToken value',
-      password: true,
-      ignoreFocusOut: true
-    }))?.trim();
+    const token = (
+      await vscode.window.showInputBox({
+        prompt: 'Enter your Cursor Workos session token',
+        placeHolder: 'WorkosCursorSessionToken value',
+        password: true,
+        ignoreFocusOut: true,
+      })
+    )?.trim()
     if (token) {
-      const section = vscode.workspace.getConfiguration('cursorUsage');
-      await section.update('token', token, vscode.ConfigurationTarget.Global);
+      const section = vscode.workspace.getConfiguration('cursorUsage')
+      if (secretStorage) {
+        await secretStorage.store(TOKEN_SECRET_KEY, token)
+        await clearLegacyTokenFromSettings()
+      } else {
+        await section.update('token', token, vscode.ConfigurationTarget.Global)
+      }
     }
   } else if (action === 'Open Settings') {
-    void vscode.commands.executeCommand('workbench.action.openSettings', 'cursorUsage');
+    void vscode.commands.executeCommand('workbench.action.openSettings', 'cursorUsage')
   }
 }
 
 function detectAuthErrorResponse(response: unknown): string | undefined {
   if (!response || typeof response !== 'object') {
-    return undefined;
+    return undefined
   }
 
-  const authRegex = /(token|unauthorized|forbidden|auth|login|expired)/i;
-  const record = response as Record<string, unknown>;
-  const fields = ['error', 'message', 'detail', 'errorMessage'];
+  const authRegex = /(token|unauthorized|forbidden|auth|login|expired)/i
+  const record = response as Record<string, unknown>
+  const fields = ['error', 'message', 'detail', 'errorMessage']
 
   for (const field of fields) {
-    const value = record[field];
+    const value = record[field]
     if (typeof value === 'string' && authRegex.test(value)) {
-      return value;
+      return value
     }
   }
 
-  const errors = record.errors;
+  const errors = record.errors
   if (Array.isArray(errors)) {
     for (const entry of errors) {
       if (typeof entry === 'string' && authRegex.test(entry)) {
-        return entry;
+        return entry
       }
       if (entry && typeof entry === 'object') {
-        const message = (entry as Record<string, unknown>).message;
+        const message = (entry as Record<string, unknown>).message
         if (typeof message === 'string' && authRegex.test(message)) {
-          return message;
+          return message
         }
       }
     }
   }
 
-  return undefined;
+  return undefined
 }
 
 function extractUsage(response: unknown, config: UsageConfig): UsageResult {
   if (!response || typeof response !== 'object') {
-    return { raw: response };
+    return { raw: response }
   }
 
-  const memberUsage = findTeamMemberUsage(response, config.email);
+  const memberUsage = findTeamMemberUsage(response, config.email)
   if (memberUsage) {
     return {
       used: memberUsage.used,
       usedPath: memberUsage.usedPath,
-      raw: response
-    };
+      raw: response,
+    }
   }
 
   return {
-    raw: response
-  };
+    raw: response,
+  }
 }
 
-function findTeamMemberUsage(
-  response: unknown,
-  email: string
-): { used: number; usedPath: string } | undefined {
+function findTeamMemberUsage(response: unknown, email: string): { used: number; usedPath: string } | undefined {
   if (!email || typeof response !== 'object' || response === null) {
-    return undefined;
+    return undefined
   }
 
-  const memberSpend = (response as Record<string, unknown>).teamMemberSpend;
+  const memberSpend = (response as Record<string, unknown>).teamMemberSpend
   if (!Array.isArray(memberSpend)) {
-    return undefined;
+    return undefined
   }
 
-  const targetEmail = email.trim().toLowerCase();
+  const targetEmail = email.trim().toLowerCase()
   for (let index = 0; index < memberSpend.length; index += 1) {
-    const item = memberSpend[index];
+    const item = memberSpend[index]
     if (!item || typeof item !== 'object') {
-      continue;
+      continue
     }
 
-    const entry = item as Record<string, unknown>;
-    const entryEmail = typeof entry.email === 'string' ? entry.email.trim().toLowerCase() : '';
+    const entry = item as Record<string, unknown>
+    const entryEmail = typeof entry.email === 'string' ? entry.email.trim().toLowerCase() : ''
     if (entryEmail !== targetEmail) {
-      continue;
+      continue
     }
 
-    const includedSpend = entry.includedSpendCents;
+    const includedSpend = entry.includedSpendCents
     if (typeof includedSpend === 'number') {
-      return { used: includedSpend, usedPath: `teamMemberSpend.${index}.includedSpendCents` };
+      return { used: includedSpend, usedPath: `teamMemberSpend.${index}.includedSpendCents` }
     }
     if (typeof includedSpend === 'string') {
-      const parsed = Number(includedSpend);
+      const parsed = Number(includedSpend)
       if (!Number.isNaN(parsed)) {
-        return { used: parsed, usedPath: `teamMemberSpend.${index}.includedSpendCents` };
+        return { used: parsed, usedPath: `teamMemberSpend.${index}.includedSpendCents` }
       }
     }
   }
 
-  return undefined;
+  return undefined
 }
 
 function formatValue(value: number, path?: string): string {
-  const lowerPath = path?.toLowerCase() ?? '';
+  const lowerPath = path?.toLowerCase() ?? ''
   if (lowerPath.includes('cents')) {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
-      maximumFractionDigits: 2
-    }).format(value / 100);
+      maximumFractionDigits: 2,
+    }).format(value / 100)
   }
 
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
 }
