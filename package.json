@@ -50,26 +50,6 @@
           "default": 15,
           "minimum": 1,
           "description": "How often to refresh usage data."
-        },
-        "cursorUsage.showPercentage": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show usage percentage in the status bar."
-        },
-        "cursorUsage.showInStatusBar": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show Cursor usage in the status bar."
-        },
-        "cursorUsage.responseUsedField": {
-          "type": "string",
-          "default": "",
-          "description": "Dot path to the numeric usage field in the response (e.g. spendCents)."
-        },
-        "cursorUsage.responseLimitField": {
-          "type": "string",
-          "default": "",
-          "description": "Dot path to the numeric limit field in the response (optional)."
         }
       }
     }

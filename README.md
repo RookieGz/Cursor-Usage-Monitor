@@ -26,10 +26,6 @@ A lightweight VS Code extension that monitors your Cursor billing usage and show
    - `cursorUsage.email`
    - `cursorUsage.teamId` (defaults to `14089613`)
    - `cursorUsage.refreshIntervalMinutes`
-   - `cursorUsage.showPercentage`
-   - `cursorUsage.showInStatusBar`
-   - `cursorUsage.responseUsedField` (optional)
-   - `cursorUsage.responseLimitField` (optional)
 
 ## Commands
 
@@ -48,4 +44,4 @@ A lightweight VS Code extension that monitors your Cursor billing usage and show
 ## Notes
 
 - The extension calls `https://cursor.com/api/dashboard/get-team-spend` using your token and team ID.
-- If your response uses different field names, set `cursorUsage.responseUsedField` and `cursorUsage.responseLimitField` or adjust the mapping logic in `src/extension.ts`.
+- If the response structure changes, update the mapping logic in `src/extension.ts`.

@@ -11,9 +11,7 @@ import * as vscode from 'vscode';
 
 type UsageResult = {
   used?: number;
-  limit?: number;
   usedPath?: string;
-  limitPath?: string;
   raw: unknown;
 };
 
@@ -22,10 +20,6 @@ type UsageConfig = {
   email: string;
   teamId: string;
   refreshIntervalMinutes: number;
-  showPercentage: boolean;
-  showInStatusBar: boolean;
-  responseUsedField: string;
-  responseLimitField: string;
 };
 
 const DEFAULT_TEAM_ID = '14089613';
@@ -66,6 +60,8 @@ export function activate(context: vscode.ExtensionContext) {
   statusBarItem.show();
   context.subscriptions.push(statusBarItem);
 
+  void cleanupLegacySettings();
+
   context.subscriptions.push(
     vscode.commands.registerCommand('cursorUsage.refresh', async () => {
       await refreshUsage();
@@ -91,17 +87,36 @@ export function deactivate() {
   }
 }
 
+async function cleanupLegacySettings() {
+  const config = vscode.workspace.getConfiguration('cursorUsage');
+  const legacyKeys = [
+    'showPercentage',
+    'showInStatusBar',
+    'responseLimitField',
+    'responseUsedField'
+  ] as const;
+
+  for (const key of legacyKeys) {
+    const inspection = config.inspect(key);
+    if (!inspection) {
+      continue;
+    }
+    if (inspection.globalValue !== undefined) {
+      await config.update(key, undefined, vscode.ConfigurationTarget.Global);
+    }
+    if (inspection.workspaceValue !== undefined) {
+      await config.update(key, undefined, vscode.ConfigurationTarget.Workspace);
+    }
+  }
+}
+
 function getConfig(): UsageConfig {
   const config = vscode.workspace.getConfiguration('cursorUsage');
   return {
     token: (config.get<string>('token') ?? '').trim(),
     email: (config.get<string>('email') ?? '').trim(),
     teamId: (config.get<string>('teamId') ?? DEFAULT_TEAM_ID).trim(),
-    refreshIntervalMinutes: config.get<number>('refreshIntervalMinutes', 15),
-    showPercentage: config.get<boolean>('showPercentage', true),
-    showInStatusBar: config.get<boolean>('showInStatusBar', true),
-    responseUsedField: (config.get<string>('responseUsedField') ?? '').trim(),
-    responseLimitField: (config.get<string>('responseLimitField') ?? '').trim()
+    refreshIntervalMinutes: config.get<number>('refreshIntervalMinutes', 15)
   };
 }
 
@@ -128,11 +143,7 @@ async function refreshUsage() {
   isRefreshing = true;
 
   const config = getConfig();
-  if (!config.showInStatusBar) {
-    statusBarItem?.hide();
-  } else {
-    statusBarItem?.show();
-  }
+  statusBarItem?.show();
 
   try {
     const credentials = await ensureCredentials(config);
@@ -144,7 +155,7 @@ async function refreshUsage() {
     updateStatus('Cursor: loading...', 'Fetching Cursor usage...');
     const response = await fetchUsage(credentials);
     const usage = extractUsage(response, config);
-    renderUsage(usage, config, credentials.email, credentials.teamId);
+    renderUsage(usage, credentials.email, credentials.teamId);
   } catch (error) {
     if (error instanceof AuthError) {
       outputChannel?.appendLine(`[auth] ${error.message}`);
@@ -237,7 +248,7 @@ async function fetchUsage(credentials: { token: string; email: string; teamId: s
   return response;
 }
 
-function renderUsage(usage: UsageResult, config: UsageConfig, email: string, teamId: string) {
+function renderUsage(usage: UsageResult, email: string, teamId: string) {
   const tooltip = new vscode.MarkdownString(
     `Cursor usage\n\nEmail: ${email}\n\nTeam ID: ${teamId}`
   );
@@ -249,18 +260,7 @@ function renderUsage(usage: UsageResult, config: UsageConfig, email: string, tea
   }
 
   const usedText = formatValue(usage.used, usage.usedPath);
-  let text = `Cursor: ${usedText}`;
-
-  if (usage.limit !== undefined) {
-    const limitText = formatValue(usage.limit, usage.limitPath);
-    text = `Cursor: ${usedText} / ${limitText}`;
-    if (config.showPercentage && usage.limit > 0) {
-      const percent = Math.round((usage.used / usage.limit) * 100);
-      text = `${text} (${percent}%)`;
-    }
-  }
-
-  updateStatus(text, 'Usage updated', tooltip);
+  updateStatus(`Cursor: ${usedText}`, 'Usage updated', tooltip);
 }
 
 function updateStatus(text: string, tooltip?: string, markdownTooltip?: vscode.MarkdownString) {
@@ -386,48 +386,16 @@ function extractUsage(response: unknown, config: UsageConfig): UsageResult {
     return { raw: response };
   }
 
-  const limitPath =
-    config.responseLimitField ||
-    guessUsagePath(response, [
-      'spendLimitCents',
-      'limit',
-      'quota',
-      'max',
-      'usageLimit',
-      'monthlyLimit'
-    ]);
-  const limit = limitPath ? getNumberByPath(response, limitPath) : undefined;
-
-  if (!config.responseUsedField) {
-    const memberUsage = findTeamMemberUsage(response, config.email);
-    if (memberUsage) {
-      return {
-        used: memberUsage.used,
-        limit,
-        usedPath: memberUsage.usedPath,
-        limitPath,
-        raw: response
-      };
-    }
+  const memberUsage = findTeamMemberUsage(response, config.email);
+  if (memberUsage) {
+    return {
+      used: memberUsage.used,
+      usedPath: memberUsage.usedPath,
+      raw: response
+    };
   }
 
-  const usedPath = config.responseUsedField || guessUsagePath(response, [
-    'spendCents',
-    'spend',
-    'usage',
-    'used',
-    'totalSpendCents',
-    'totalSpend',
-    'monthlySpendCents',
-    'monthlySpend'
-  ]);
-  const used = usedPath ? getNumberByPath(response, usedPath) : undefined;
-
   return {
-    used,
-    limit,
-    usedPath,
-    limitPath,
     raw: response
   };
 }
@@ -471,89 +439,6 @@ function findTeamMemberUsage(
   }
 
   return undefined;
-}
-
-function guessUsagePath(data: unknown, candidates: string[]): string | undefined {
-  const targetKeys = new Set(candidates.map((candidate) => candidate.toLowerCase()));
-  const queue: Array<{ value: unknown; path: string }> = [{ value: data, path: '' }];
-
-  while (queue.length) {
-    const { value, path } = queue.shift()!;
-    if (!value || typeof value !== 'object') {
-      continue;
-    }
-
-    if (Array.isArray(value)) {
-      value.forEach((item, index) => {
-        queue.push({ value: item, path: path ? `${path}.${index}` : `${index}` });
-      });
-      continue;
-    }
-
-    for (const [key, child] of Object.entries(value)) {
-      const nextPath = path ? `${path}.${key}` : key;
-      if (targetKeys.has(key.toLowerCase()) && isNumeric(child)) {
-        return nextPath;
-      }
-
-      if (child && typeof child === 'object') {
-        queue.push({ value: child, path: nextPath });
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function getNumberByPath(data: unknown, path: string): number | undefined {
-  const value = getValueByPath(data, path);
-  if (typeof value === 'number') {
-    return value;
-  }
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    if (!Number.isNaN(parsed)) {
-      return parsed;
-    }
-  }
-  return undefined;
-}
-
-function getValueByPath(data: unknown, path: string): unknown {
-  const parts = path.split('.').filter(Boolean);
-  let current: unknown = data;
-
-  for (const part of parts) {
-    if (current === null || current === undefined) {
-      return undefined;
-    }
-
-    if (Array.isArray(current)) {
-      if (!/^\d+$/.test(part)) {
-        return undefined;
-      }
-      current = current[Number(part)];
-      continue;
-    }
-
-    if (typeof current !== 'object') {
-      return undefined;
-    }
-
-    current = (current as Record<string, unknown>)[part];
-  }
-
-  return current;
-}
-
-function isNumeric(value: unknown): boolean {
-  if (typeof value === 'number') {
-    return true;
-  }
-  if (typeof value === 'string') {
-    return value.trim() !== '' && !Number.isNaN(Number(value));
-  }
-  return false;
 }
 
 function formatValue(value: number, path?: string): string {
