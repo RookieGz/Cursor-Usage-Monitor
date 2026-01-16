@@ -32,9 +32,10 @@ package:
     - corepack enable
     - pnpm install --frozen-lockfile
     - pnpm run package
+    - mv ./*.vsix cursor-usage.vsix
   artifacts:
     name: "cursor-usage-$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
     expose_as: "VSIX Package"
     paths:
-      - "*.vsix"
+      - cursor-usage.vsix
     expire_in: 2 weeks
