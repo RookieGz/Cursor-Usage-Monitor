@@ -5,18 +5,19 @@ stages:
   - package
 
 variables:
-  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
+  PNPM_STORE_DIR: "$CI_PROJECT_DIR/.pnpm-store"
 
 cache:
   key: "$CI_COMMIT_REF_SLUG"
   paths:
-    - .npm/
+    - .pnpm-store/
 
 build:
   stage: build
   script:
-    - npm ci
-    - npm run build
+    - corepack enable
+    - pnpm install --frozen-lockfile
+    - pnpm run build
   artifacts:
     paths:
       - dist/
@@ -28,9 +29,12 @@ package:
     - job: build
       artifacts: true
   script:
-    - npm ci
-    - npm run package
+    - corepack enable
+    - pnpm install --frozen-lockfile
+    - pnpm run package
   artifacts:
+    name: "cursor-usage-$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
+    expose_as: "VSIX Package"
     paths:
       - "*.vsix"
     expire_in: 2 weeks

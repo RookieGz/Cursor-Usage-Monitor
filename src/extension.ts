@@ -29,7 +29,7 @@ type UsageCredentials = {
 
 const DEFAULT_TEAM_ID = '14089613'
 const OUTPUT_CHANNEL_NAME = 'Cursor Usage'
-const REQUEST_URL = 'https://cursor.com/api/dashboard/get-team-spend'
+const REQUEST_URL = 'https://cursor.com/api/usage-summary'
 const TOKEN_SECRET_KEY = 'cursorUsage.token'
 
 let statusBarItem: vscode.StatusBarItem | undefined
@@ -272,12 +272,6 @@ async function ensureCredentials(config: UsageConfig): Promise<UsageCredentials 
 }
 
 async function fetchUsage(credentials: { token: string; email: string; teamId: string }): Promise<unknown> {
-  const teamIdNumber = Number.parseInt(credentials.teamId, 10)
-  if (Number.isNaN(teamIdNumber)) {
-    throw new Error(`Invalid teamId: ${credentials.teamId}`)
-  }
-
-  const body = JSON.stringify({ teamId: teamIdNumber })
   let cookieHeader = credentials.token.trim()
   if (!cookieHeader.toLowerCase().includes('workoscursorsessiontoken=')) {
     cookieHeader = `WorkosCursorSessionToken=${cookieHeader}`
@@ -285,14 +279,13 @@ async function fetchUsage(credentials: { token: string; email: string; teamId: s
 
   const headers: Record<string, string> = {
     Accept: '*/*',
-    'Content-Type': 'application/json',
     Origin: 'https://cursor.com',
     Referer: 'https://cursor.com/cn/dashboard?tab=usage',
     'User-Agent': 'cursor-usage-vscode',
     Cookie: cookieHeader,
   }
 
-  const response = await requestJson(REQUEST_URL, 'POST', headers, body)
+  const response = await requestJson(REQUEST_URL, 'GET', headers)
   const authIssue = detectAuthErrorResponse(response)
   if (authIssue) {
     throw new AuthError(`Authentication failed: ${authIssue}`, 200, JSON.stringify(response))
@@ -451,6 +444,15 @@ function extractUsage(response: unknown, config: UsageConfig): UsageResult {
     return { raw: response }
   }
 
+  const summaryUsage = findSummaryUsage(response)
+  if (summaryUsage) {
+    return {
+      used: summaryUsage.used,
+      usedPath: summaryUsage.usedPath,
+      raw: response,
+    }
+  }
+
   const memberUsage = findTeamMemberUsage(response, config.email)
   if (memberUsage) {
     return {
@@ -463,6 +465,35 @@ function extractUsage(response: unknown, config: UsageConfig): UsageResult {
   return {
     raw: response,
   }
+}
+
+function findSummaryUsage(response: unknown): { used: number; usedPath: string } | undefined {
+  if (!response || typeof response !== 'object') {
+    return undefined
+  }
+
+  const individualUsage = (response as Record<string, unknown>).individualUsage
+  if (!individualUsage || typeof individualUsage !== 'object') {
+    return undefined
+  }
+
+  const plan = (individualUsage as Record<string, unknown>).plan
+  if (!plan || typeof plan !== 'object') {
+    return undefined
+  }
+
+  const used = (plan as Record<string, unknown>).used
+  if (typeof used === 'number') {
+    return { used, usedPath: 'individualUsage.plan.used' }
+  }
+  if (typeof used === 'string') {
+    const parsed = Number(used)
+    if (!Number.isNaN(parsed)) {
+      return { used: parsed, usedPath: 'individualUsage.plan.used' }
+    }
+  }
+
+  return undefined
 }
 
 function findTeamMemberUsage(response: unknown, email: string): { used: number; usedPath: string } | undefined {
@@ -505,7 +536,7 @@ function findTeamMemberUsage(response: unknown, email: string): { used: number; 
 
 function formatValue(value: number, path?: string): string {
   const lowerPath = path?.toLowerCase() ?? ''
-  if (lowerPath.includes('cents')) {
+  if (lowerPath.includes('cents') || lowerPath === 'individualusage.plan.used') {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
