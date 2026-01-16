@@ -47,27 +47,18 @@ release:
       artifacts: true
   rules:
     - if: $CI_COMMIT_TAG
-  before_script:
-    - mkdir -p "$CI_PROJECT_DIR/.bin"
-    - |
-      if ! command -v release-cli >/dev/null 2>&1; then
-        if command -v curl >/dev/null 2>&1; then
-          curl --silent --show-error --location \
-            --output "$CI_PROJECT_DIR/.bin/release-cli" \
-            "https://gitlab.com/gitlab-org/release-cli/-/releases/v0.16.0/downloads/release-cli-linux-amd64"
-        elif command -v wget >/dev/null 2>&1; then
-          wget -qO "$CI_PROJECT_DIR/.bin/release-cli" \
-            "https://gitlab.com/gitlab-org/release-cli/-/releases/v0.16.0/downloads/release-cli-linux-amd64"
-        else
-          echo "release-cli not found and neither curl nor wget is available." >&2
-          exit 1
-        fi
-        chmod +x "$CI_PROJECT_DIR/.bin/release-cli"
-      fi
-    - export PATH="$CI_PROJECT_DIR/.bin:$PATH"
   script:
-    - release-cli create --name "Release $CI_COMMIT_TAG" --description "Automated release for $CI_COMMIT_TAG" --tag-name "$CI_COMMIT_TAG" --assets-link "{\"url\":\"$CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/raw/cursor-usage.vsix\",\"name\":\"VSIX Package\",\"filepath\":\"/cursor-usage.vsix\"}"
+    - echo "Creating release $CI_COMMIT_TAG"
   artifacts:
     paths:
       - cursor-usage.vsix
     expire_in: 1 year
+  release:
+    tag_name: "$CI_COMMIT_TAG"
+    name: "Release $CI_COMMIT_TAG"
+    description: "Automated release for $CI_COMMIT_TAG"
+    assets:
+      links:
+        - name: "VSIX Package"
+          url: "$CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/raw/cursor-usage.vsix"
+          filepath: "/cursor-usage.vsix"
