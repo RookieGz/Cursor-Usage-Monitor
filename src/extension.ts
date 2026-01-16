@@ -75,6 +75,12 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('cursorUsage.refresh', async () => {
       await refreshUsage()
     }),
+    vscode.commands.registerCommand('cursorUsage.updateToken', async () => {
+      const updated = await promptForToken()
+      if (updated) {
+        void refreshUsage()
+      }
+    }),
     vscode.commands.registerCommand('cursorUsage.openSettings', () => {
       void vscode.commands.executeCommand('workbench.action.openSettings', 'cursorUsage')
     }),
@@ -224,24 +230,11 @@ async function ensureCredentials(config: UsageConfig): Promise<UsageCredentials 
   let { email, teamId } = config
 
   if (!token) {
-    token =
-      (
-        await vscode.window.showInputBox({
-          prompt: 'Enter your Cursor Workos session token',
-          placeHolder: 'WorkosCursorSessionToken value',
-          password: true,
-          ignoreFocusOut: true,
-        })
-      )?.trim() ?? ''
-    if (!token) {
+    const updatedToken = await promptForToken()
+    if (!updatedToken) {
       return null
     }
-    if (secretStorage) {
-      await secretStorage.store(TOKEN_SECRET_KEY, token)
-      await clearLegacyTokenFromSettings()
-    } else {
-      await section.update('token', token, vscode.ConfigurationTarget.Global)
-    }
+    token = updatedToken
   }
 
   if (!email) {
@@ -388,26 +381,35 @@ async function handleAuthError(message: string) {
   const action = await vscode.window.showWarningMessage(`Cursor token seems invalid or expired. ${message}`, 'Update Token', 'Open Settings')
 
   if (action === 'Update Token') {
-    const token = (
-      await vscode.window.showInputBox({
-        prompt: 'Enter your Cursor Workos session token',
-        placeHolder: 'WorkosCursorSessionToken value',
-        password: true,
-        ignoreFocusOut: true,
-      })
-    )?.trim()
-    if (token) {
-      const section = vscode.workspace.getConfiguration('cursorUsage')
-      if (secretStorage) {
-        await secretStorage.store(TOKEN_SECRET_KEY, token)
-        await clearLegacyTokenFromSettings()
-      } else {
-        await section.update('token', token, vscode.ConfigurationTarget.Global)
-      }
-    }
+    await promptForToken()
   } else if (action === 'Open Settings') {
     void vscode.commands.executeCommand('workbench.action.openSettings', 'cursorUsage')
   }
+}
+
+async function promptForToken(): Promise<string | null> {
+  const section = vscode.workspace.getConfiguration('cursorUsage')
+  const token = (
+    await vscode.window.showInputBox({
+      prompt: 'Enter your Cursor Workos session token',
+      placeHolder: 'WorkosCursorSessionToken value',
+      password: true,
+      ignoreFocusOut: true,
+    })
+  )?.trim()
+
+  if (!token) {
+    return null
+  }
+
+  if (secretStorage) {
+    await secretStorage.store(TOKEN_SECRET_KEY, token)
+    await clearLegacyTokenFromSettings()
+  } else {
+    await section.update('token', token, vscode.ConfigurationTarget.Global)
+  }
+
+  return token
 }
 
 function detectAuthErrorResponse(response: unknown): string | undefined {

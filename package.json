@@ -12,7 +12,8 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "onCommand:cursorUsage.refresh"
+    "onCommand:cursorUsage.refresh",
+    "onCommand:cursorUsage.updateToken"
   ],
   "main": "./dist/extension.js",
   "icon": "src/images/icon.png",
@@ -21,6 +22,10 @@
       {
         "command": "cursorUsage.refresh",
         "title": "Cursor Usage: Refresh"
+      },
+      {
+        "command": "cursorUsage.updateToken",
+        "title": "Cursor Usage: Update Token"
       },
       {
         "command": "cursorUsage.openSettings",

@@ -31,6 +31,7 @@ A lightweight VS Code extension that monitors your Cursor billing usage and show
 
 - `Cursor Usage: Refresh`
 - `Cursor Usage: Open Settings`
+- `Cursor Usage: Update Token` (use the Command Palette when you need to update your token)
 
 ## Internal Distribution
 
