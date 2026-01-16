@@ -3,6 +3,7 @@ image: node:20
 stages:
   - build
   - package
+  - release
 
 variables:
   PNPM_STORE_DIR: "$CI_PROJECT_DIR/.pnpm-store"
@@ -37,3 +38,27 @@ package:
     paths:
       - cursor-usage.vsix
     expire_in: 2 weeks
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: package
+      artifacts: true
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - echo "Creating release $CI_COMMIT_TAG"
+  artifacts:
+    paths:
+      - cursor-usage.vsix
+    expire_in: 1 year
+  release:
+    tag_name: "$CI_COMMIT_TAG"
+    name: "Release $CI_COMMIT_TAG"
+    description: "Automated release for $CI_COMMIT_TAG"
+    assets:
+      links:
+        - name: "VSIX Package"
+          url: "$CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/raw/cursor-usage.vsix"
+          filepath: "/cursor-usage.vsix"
