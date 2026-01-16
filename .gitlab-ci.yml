@@ -29,7 +29,6 @@ package:
     - job: build
       artifacts: true
   script:
-    - corepack enable
     - pnpm install --frozen-lockfile
     - pnpm run package
     - mv ./*.vsix cursor-usage.vsix
