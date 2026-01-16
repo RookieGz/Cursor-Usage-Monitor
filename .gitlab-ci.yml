@@ -1,11 +1,11 @@
+image: node:20
+
 stages:
   - build
   - package
-  - release
 
 variables:
   PNPM_STORE_DIR: "$CI_PROJECT_DIR/.pnpm-store"
-  RELEASE_DESCRIPTION: "Release notes"
 
 cache:
   key: "$CI_COMMIT_REF_SLUG"
@@ -37,18 +37,3 @@ package:
     paths:
       - cursor-usage.vsix
     expire_in: 2 weeks
-
-release:
-  stage: release
-  image: registry.gitlab.com/gitlab-org/cli:latest
-  needs:
-    - job: package
-      artifacts: true
-  rules:
-    - if: $CI_COMMIT_TAG
-  script:
-    - glab release create "$CI_COMMIT_TAG" --name "$CI_COMMIT_TAG" --notes "$RELEASE_DESCRIPTION" --assets-links "[{\"name\":\"VSIX Package\",\"url\":\"$CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/raw/cursor-usage.vsix\"}]"
-  artifacts:
-    paths:
-      - cursor-usage.vsix
-    expire_in: 1 year
