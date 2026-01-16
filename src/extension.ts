@@ -1,6 +1,6 @@
 /*
  * @Date: 2026-01-15 15:41:46
- * @LastEditTime: 2026-01-15 17:50:45
+ * @LastEditTime: 2026-01-16 10:12:07
  * @FilePath: /cursor-usage/src/extension.ts
  * @Description:
  *
@@ -201,7 +201,7 @@ async function refreshUsage() {
     updateStatus('Cursor: loading...', 'Fetching Cursor usage...')
     const response = await fetchUsage(credentials)
     const usage = extractUsage(response, config)
-    renderUsage(usage, credentials.email, credentials.teamId)
+    renderUsage(usage, credentials.email)
   } catch (error) {
     if (error instanceof AuthError) {
       outputChannel?.appendLine(`[auth] ${error.message}`)
@@ -309,8 +309,14 @@ async function fetchUsage(credentials: { token: string; email: string; teamId: s
   return response
 }
 
-function renderUsage(usage: UsageResult, email: string, teamId: string) {
-  const tooltip = new vscode.MarkdownString(`Cursor usage\n\nEmail: ${email}\n\nTeam ID: ${teamId}`)
+function renderUsage(usage: UsageResult, email: string) {
+  const nextCycleStart = getNextCycleStartMs(usage.raw)
+  const nextCycleText = nextCycleStart ? formatTimestamp(nextCycleStart) : undefined
+  const tooltipLines = ['Cursor usage', '', `Email: ${email}`]
+  if (nextCycleText) {
+    tooltipLines.push('', `Next cycle start: ${nextCycleText}`)
+  }
+  const tooltip = new vscode.MarkdownString(tooltipLines.join('\n'))
   tooltip.isTrusted = false
 
   if (usage.used === undefined) {
@@ -506,4 +512,36 @@ function formatValue(value: number, path?: string): string {
   }
 
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
+}
+
+function getNextCycleStartMs(response: unknown): number | undefined {
+  if (!response || typeof response !== 'object') {
+    return undefined
+  }
+  const value = (response as Record<string, unknown>).nextCycleStart
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+  return undefined
+}
+
+function formatTimestamp(ms: number): string {
+  const date = new Date(ms)
+  if (Number.isNaN(date.getTime())) {
+    return 'Invalid date'
+  }
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const year = date.getFullYear()
+  const month = pad(date.getMonth() + 1)
+  const day = pad(date.getDate())
+  const hours = pad(date.getHours())
+  const minutes = pad(date.getMinutes())
+  const seconds = pad(date.getSeconds())
+  return `${year}/${month}/${day}-${hours}:${minutes}:${seconds}`
 }

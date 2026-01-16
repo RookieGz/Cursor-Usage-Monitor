@@ -3,7 +3,7 @@
   "displayName": "Cursor Usage Monitor",
   "description": "Monitor your Cursor account billing usage from VS Code.",
   "version": "0.0.1",
-  "publisher": "zgz",
+  "publisher": "ZGZ",
   "engines": {
     "vscode": "^1.86.0"
   },
@@ -60,5 +60,9 @@
     "@types/vscode": "^1.86.0",
     "typescript": "^5.3.3",
     "@vscode/vsce": "^3.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
   }
 }
