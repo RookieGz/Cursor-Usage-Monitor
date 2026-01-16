@@ -1,0 +1,36 @@
+image: node:20
+
+stages:
+  - build
+  - package
+
+variables:
+  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm"
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .npm/
+
+build:
+  stage: build
+  script:
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week
+
+package:
+  stage: package
+  needs:
+    - job: build
+      artifacts: true
+  script:
+    - npm ci
+    - npm run package
+  artifacts:
+    paths:
+      - "*.vsix"
+    expire_in: 2 weeks
