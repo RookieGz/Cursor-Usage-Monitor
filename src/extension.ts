@@ -1,6 +1,6 @@
 /*
  * @Date: 2026-01-15 15:41:46
- * @LastEditTime: 2026-01-16 10:12:07
+ * @LastEditTime: 2026-01-19 10:52:44
  * @FilePath: /cursor-usage/src/extension.ts
  * @Description:
  *
@@ -11,23 +11,24 @@ import * as vscode from 'vscode'
 
 type UsageResult = {
   used?: number
+  limit?: number
+  percent?: number
   usedPath?: string
+  limitPath?: string
   raw: unknown
 }
 
+type DisplayMode = 'money' | 'percent'
+
 type UsageConfig = {
-  email: string
-  teamId: string
   refreshIntervalMinutes: number
+  displayMode: DisplayMode
 }
 
 type UsageCredentials = {
   token: string
-  email: string
-  teamId: string
 }
 
-const DEFAULT_TEAM_ID = '14089613'
 const OUTPUT_CHANNEL_NAME = 'Cursor Usage'
 const REQUEST_URL = 'https://cursor.com/api/usage-summary'
 const TOKEN_SECRET_KEY = 'cursorUsage.token'
@@ -37,6 +38,7 @@ let refreshTimer: NodeJS.Timeout | undefined
 let outputChannel: vscode.OutputChannel | undefined
 let isRefreshing = false
 let secretStorage: vscode.SecretStorage | undefined
+let lastUsage: UsageResult | undefined
 
 class RequestError extends Error {
   statusCode: number
@@ -85,8 +87,21 @@ export function activate(context: vscode.ExtensionContext) {
       void vscode.commands.executeCommand('workbench.action.openSettings', 'cursorUsage')
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration('cursorUsage')) {
+      if (!event.affectsConfiguration('cursorUsage')) {
+        return
+      }
+
+      const config = getConfig()
+      if (event.affectsConfiguration('cursorUsage.refreshIntervalMinutes')) {
         scheduleRefresh()
+      }
+
+      if (event.affectsConfiguration('cursorUsage.displayMode')) {
+        if (lastUsage) {
+          renderUsage(lastUsage, config.displayMode)
+        } else {
+          void refreshUsage()
+        }
       }
     })
   )
@@ -122,10 +137,10 @@ async function cleanupLegacySettings() {
 
 function getConfig(): UsageConfig {
   const config = vscode.workspace.getConfiguration('cursorUsage')
+  const displayMode = (config.get<string>('displayMode') ?? 'money').trim().toLowerCase()
   return {
-    email: (config.get<string>('email') ?? '').trim(),
-    teamId: (config.get<string>('teamId') ?? DEFAULT_TEAM_ID).trim(),
     refreshIntervalMinutes: config.get<number>('refreshIntervalMinutes', 15),
+    displayMode: displayMode === 'percent' ? 'percent' : 'money',
   }
 }
 
@@ -198,7 +213,7 @@ async function refreshUsage() {
   statusBarItem?.show()
 
   try {
-    const credentials = await ensureCredentials(config)
+    const credentials = await ensureCredentials()
     if (!credentials) {
       updateStatus('Cursor: missing settings', 'Missing Cursor credentials')
       return
@@ -206,8 +221,9 @@ async function refreshUsage() {
 
     updateStatus('Cursor: loading...', 'Fetching Cursor usage...')
     const response = await fetchUsage(credentials)
-    const usage = extractUsage(response, config)
-    renderUsage(usage, credentials.email)
+    const usage = extractUsage(response)
+    lastUsage = usage
+    renderUsage(usage, config.displayMode)
   } catch (error) {
     if (error instanceof AuthError) {
       outputChannel?.appendLine(`[auth] ${error.message}`)
@@ -224,10 +240,8 @@ async function refreshUsage() {
   }
 }
 
-async function ensureCredentials(config: UsageConfig): Promise<UsageCredentials | null> {
-  const section = vscode.workspace.getConfiguration('cursorUsage')
+async function ensureCredentials(): Promise<UsageCredentials | null> {
   let token = await getStoredToken()
-  let { email, teamId } = config
 
   if (!token) {
     const updatedToken = await promptForToken()
@@ -237,41 +251,10 @@ async function ensureCredentials(config: UsageConfig): Promise<UsageCredentials 
     token = updatedToken
   }
 
-  if (!email) {
-    email =
-      (
-        await vscode.window.showInputBox({
-          prompt: 'Enter your Cursor account email',
-          placeHolder: 'name@example.com',
-          ignoreFocusOut: true,
-        })
-      )?.trim() ?? ''
-    if (!email) {
-      return null
-    }
-    await section.update('email', email, vscode.ConfigurationTarget.Global)
-  }
-
-  if (!teamId) {
-    teamId =
-      (
-        await vscode.window.showInputBox({
-          prompt: 'Enter your Cursor team ID',
-          placeHolder: DEFAULT_TEAM_ID,
-          value: DEFAULT_TEAM_ID,
-          ignoreFocusOut: true,
-        })
-      )?.trim() ?? ''
-    if (!teamId) {
-      return null
-    }
-    await section.update('teamId', teamId, vscode.ConfigurationTarget.Global)
-  }
-
-  return { token, email, teamId }
+  return { token }
 }
 
-async function fetchUsage(credentials: { token: string; email: string; teamId: string }): Promise<unknown> {
+async function fetchUsage(credentials: UsageCredentials): Promise<unknown> {
   let cookieHeader = credentials.token.trim()
   if (!cookieHeader.toLowerCase().includes('workoscursorsessiontoken=')) {
     cookieHeader = `WorkosCursorSessionToken=${cookieHeader}`
@@ -295,18 +278,40 @@ async function fetchUsage(credentials: { token: string; email: string; teamId: s
   return response
 }
 
-function renderUsage(usage: UsageResult, email: string) {
-  const nextCycleStart = getNextCycleStartMs(usage.raw)
-  const nextCycleText = nextCycleStart ? formatTimestamp(nextCycleStart) : undefined
-  const tooltipLines = ['Cursor usage', '', `Email: ${email}`]
-  if (nextCycleText) {
-    tooltipLines.push('', `Next cycle start: ${nextCycleText}`)
+function renderUsage(usage: UsageResult, displayMode: DisplayMode) {
+  const tooltipLines = ['Cursor usage']
+
+  const cycleRangeText = getBillingCycleRangeText(usage.raw)
+  if (cycleRangeText) {
+    tooltipLines.push('', `Billing cycle: ${cycleRangeText}`)
   }
+
+  if (usage.used !== undefined) {
+    const usedText = formatValue(usage.used, usage.usedPath)
+    if (displayMode === 'percent') {
+      const limitText = usage.limit !== undefined ? formatValue(usage.limit, usage.limitPath) : undefined
+      const usageText = limitText ? `${usedText} / ${limitText}` : usedText
+      tooltipLines.push('', `Usage: ${usageText}`)
+    } else {
+      tooltipLines.push('', `Usage: ${usedText}`)
+    }
+  }
+
   const tooltip = new vscode.MarkdownString(tooltipLines.join('\n'))
   tooltip.isTrusted = false
 
   if (usage.used === undefined) {
     updateStatus('Cursor: no data', 'Unable to locate usage fields in response', tooltip)
+    return
+  }
+
+  if (displayMode === 'percent') {
+    if (usage.percent === undefined) {
+      updateStatus('Cursor: no data', 'Unable to calculate usage percentage', tooltip)
+      return
+    }
+    const percentText = formatPercent(usage.percent)
+    updateStatus(`Cursor: ${percentText}`, 'Usage updated', tooltip)
     return
   }
 
@@ -439,25 +444,23 @@ function detectAuthErrorResponse(response: unknown): string | undefined {
   return undefined
 }
 
-function extractUsage(response: unknown, config: UsageConfig): UsageResult {
+function extractUsage(response: unknown): UsageResult {
   if (!response || typeof response !== 'object') {
     return { raw: response }
   }
 
   const summaryUsage = findSummaryUsage(response)
   if (summaryUsage) {
+    const percent =
+      summaryUsage.limit !== undefined && summaryUsage.limit > 0
+        ? (summaryUsage.used / summaryUsage.limit) * 100
+        : undefined
     return {
       used: summaryUsage.used,
+      limit: summaryUsage.limit,
+      percent,
       usedPath: summaryUsage.usedPath,
-      raw: response,
-    }
-  }
-
-  const memberUsage = findTeamMemberUsage(response, config.email)
-  if (memberUsage) {
-    return {
-      used: memberUsage.used,
-      usedPath: memberUsage.usedPath,
+      limitPath: summaryUsage.limitPath,
       raw: response,
     }
   }
@@ -467,7 +470,9 @@ function extractUsage(response: unknown, config: UsageConfig): UsageResult {
   }
 }
 
-function findSummaryUsage(response: unknown): { used: number; usedPath: string } | undefined {
+function findSummaryUsage(
+  response: unknown
+): { used: number; limit?: number; usedPath: string; limitPath?: string } | undefined {
   if (!response || typeof response !== 'object') {
     return undefined
   }
@@ -482,61 +487,40 @@ function findSummaryUsage(response: unknown): { used: number; usedPath: string }
     return undefined
   }
 
-  const used = (plan as Record<string, unknown>).used
-  if (typeof used === 'number') {
-    return { used, usedPath: 'individualUsage.plan.used' }
-  }
-  if (typeof used === 'string') {
-    const parsed = Number(used)
-    if (!Number.isNaN(parsed)) {
-      return { used: parsed, usedPath: 'individualUsage.plan.used' }
-    }
+  const used = parseNumber((plan as Record<string, unknown>).used)
+  if (used === undefined) {
+    return undefined
   }
 
-  return undefined
+  const limit = parseNumber((plan as Record<string, unknown>).limit)
+  return {
+    used,
+    limit,
+    usedPath: 'individualUsage.plan.used',
+    limitPath: limit === undefined ? undefined : 'individualUsage.plan.limit',
+  }
 }
 
-function findTeamMemberUsage(response: unknown, email: string): { used: number; usedPath: string } | undefined {
-  if (!email || typeof response !== 'object' || response === null) {
-    return undefined
+function parseNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
   }
-
-  const memberSpend = (response as Record<string, unknown>).teamMemberSpend
-  if (!Array.isArray(memberSpend)) {
-    return undefined
-  }
-
-  const targetEmail = email.trim().toLowerCase()
-  for (let index = 0; index < memberSpend.length; index += 1) {
-    const item = memberSpend[index]
-    if (!item || typeof item !== 'object') {
-      continue
-    }
-
-    const entry = item as Record<string, unknown>
-    const entryEmail = typeof entry.email === 'string' ? entry.email.trim().toLowerCase() : ''
-    if (entryEmail !== targetEmail) {
-      continue
-    }
-
-    const includedSpend = entry.includedSpendCents
-    if (typeof includedSpend === 'number') {
-      return { used: includedSpend, usedPath: `teamMemberSpend.${index}.includedSpendCents` }
-    }
-    if (typeof includedSpend === 'string') {
-      const parsed = Number(includedSpend)
-      if (!Number.isNaN(parsed)) {
-        return { used: parsed, usedPath: `teamMemberSpend.${index}.includedSpendCents` }
-      }
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) {
+      return parsed
     }
   }
-
   return undefined
 }
 
 function formatValue(value: number, path?: string): string {
   const lowerPath = path?.toLowerCase() ?? ''
-  if (lowerPath.includes('cents') || lowerPath === 'individualusage.plan.used') {
+  if (
+    lowerPath.includes('cents') ||
+    lowerPath === 'individualusage.plan.used' ||
+    lowerPath === 'individualusage.plan.limit'
+  ) {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
@@ -547,17 +531,38 @@ function formatValue(value: number, path?: string): string {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
 }
 
-function getNextCycleStartMs(response: unknown): number | undefined {
+function formatPercent(value: number): string {
+  return `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)}%`
+}
+
+function getBillingCycleRangeText(response: unknown): string | undefined {
   if (!response || typeof response !== 'object') {
     return undefined
   }
-  const value = (response as Record<string, unknown>).nextCycleStart
+
+  const start = getBillingCycleMs(response, 'billingCycleStart')
+  const end = getBillingCycleMs(response, 'billingCycleEnd')
+  if (!start && !end) {
+    return undefined
+  }
+
+  const startText = start ? formatTimestamp(start) : '--'
+  const endText = end ? formatTimestamp(end) : '--'
+  return `${startText} ~ ${endText}`
+}
+
+function getBillingCycleMs(response: unknown, field: 'billingCycleStart' | 'billingCycleEnd'): number | undefined {
+  if (!response || typeof response !== 'object') {
+    return undefined
+  }
+
+  const value = (response as Record<string, unknown>)[field]
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value
   }
   if (typeof value === 'string') {
-    const parsed = Number(value)
-    if (Number.isFinite(parsed)) {
+    const parsed = Date.parse(value)
+    if (!Number.isNaN(parsed)) {
       return parsed
     }
   }
@@ -575,6 +580,5 @@ function formatTimestamp(ms: number): string {
   const day = pad(date.getDate())
   const hours = pad(date.getHours())
   const minutes = pad(date.getMinutes())
-  const seconds = pad(date.getSeconds())
-  return `${year}/${month}/${day}-${hours}:${minutes}:${seconds}`
+  return `${year}-${month}-${day} ${hours}:${minutes}`
 }

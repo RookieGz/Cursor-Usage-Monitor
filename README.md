@@ -12,9 +12,9 @@ A lightweight VS Code extension that monitors your Cursor billing usage and show
 
 ## Features
 
-- Status bar usage display with percentage.
+- Status bar usage display with money or percentage.
 - Manual refresh command.
-- Configurable polling interval and API settings.
+- Configurable polling interval.
 
 ## Setup
 
@@ -22,8 +22,7 @@ A lightweight VS Code extension that monitors your Cursor billing usage and show
 2. Build: `npm run build`
 3. Press `F5` to launch the Extension Development Host.
 4. Configure settings in VS Code:
-   - `cursorUsage.email`
-   - `cursorUsage.teamId` (defaults to `14089613`)
+   - `cursorUsage.displayMode` (`money` or `percent`)
    - `cursorUsage.refreshIntervalMinutes`
 5. On first refresh, you'll be prompted for `WorkosCursorSessionToken` (stored in VS Code SecretStorage).
 
@@ -44,5 +43,5 @@ A lightweight VS Code extension that monitors your Cursor billing usage and show
 
 ## Notes
 
-- The extension calls `https://cursor.com/api/dashboard/get-team-spend` using your token and team ID.
+- The extension calls `https://cursor.com/api/usage-summary` using your token.
 - If the response structure changes, update the mapping logic in `src/extension.ts`.

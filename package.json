@@ -35,15 +35,14 @@
     "configuration": {
       "title": "Cursor Usage",
       "properties": {
-        "cursorUsage.email": {
+        "cursorUsage.displayMode": {
           "type": "string",
-          "default": "",
-          "description": "Cursor account email used for request metadata."
-        },
-        "cursorUsage.teamId": {
-          "type": "string",
-          "default": "14089613",
-          "description": "Cursor team ID used in the request payload."
+          "default": "money",
+          "enum": [
+            "money",
+            "percent"
+          ],
+          "description": "Show usage as money or percentage."
         },
         "cursorUsage.refreshIntervalMinutes": {
           "type": "number",
