@@ -487,7 +487,12 @@ function findSummaryUsage(
     return undefined
   }
 
-  const used = parseNumber((plan as Record<string, unknown>).used)
+  const breakdown = (plan as Record<string, unknown>).breakdown
+  if (!breakdown || typeof breakdown !== 'object') {
+    return undefined
+  }
+
+  const used = parseNumber((breakdown as Record<string, unknown>).total)
   if (used === undefined) {
     return undefined
   }
@@ -496,7 +501,7 @@ function findSummaryUsage(
   return {
     used,
     limit,
-    usedPath: 'individualUsage.plan.used',
+    usedPath: 'individualUsage.plan.breakdown.total',
     limitPath: limit === undefined ? undefined : 'individualUsage.plan.limit',
   }
 }
@@ -518,7 +523,7 @@ function formatValue(value: number, path?: string): string {
   const lowerPath = path?.toLowerCase() ?? ''
   if (
     lowerPath.includes('cents') ||
-    lowerPath === 'individualusage.plan.used' ||
+    lowerPath === 'individualusage.plan.breakdown.total' ||
     lowerPath === 'individualusage.plan.limit'
   ) {
     return new Intl.NumberFormat('en-US', {
