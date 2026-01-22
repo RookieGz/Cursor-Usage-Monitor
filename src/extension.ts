@@ -1,11 +1,3 @@
-/*
- * @Date: 2026-01-15 15:41:46
- * @LastEditTime: 2026-01-19 10:52:44
- * @FilePath: /cursor-usage/src/extension.ts
- * @Description:
- *
- */
-
 import * as https from 'https'
 import * as vscode from 'vscode'
 

@@ -1,11 +1,3 @@
-<!--
- * @Date: 2026-01-15 15:41:54
- * @LastEditTime: 2026-01-15 17:00:57
- * @FilePath: /cursor-usage/README.md
- * @Description:
- *
--->
-
 # Cursor Usage Monitor
 
 A lightweight VS Code extension that monitors your Cursor billing usage and shows it in the status bar.
