@@ -78,5 +78,6 @@
     "type": "git",
     "url": "https://github.com/RookieGz/Cursor-Usage-Monitor"
   },
+  "packageManager": "pnpm@9.12.3",
   "license": "MIT"
 }
