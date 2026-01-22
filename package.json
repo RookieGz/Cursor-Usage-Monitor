@@ -2,7 +2,7 @@
   "name": "cursor-usage",
   "displayName": "Cursor Usage Monitor",
   "description": "Monitor your Cursor account billing usage from Cursor Usage Monitor.",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "ZGZ",
   "engines": {
     "vscode": "^1.86.0"
