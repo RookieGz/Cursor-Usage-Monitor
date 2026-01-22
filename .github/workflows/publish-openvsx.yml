@@ -3,7 +3,7 @@ name: Publish to Open VSX
 on:
   push:
     tags:
-      - 'v*'   # 例如 v0.0.4
+      - 'v*'
 
 jobs:
   publish:
@@ -17,7 +17,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
+          # ❌ 不要写 cache: pnpm
 
       - name: Enable Corepack (pnpm)
         run: |
@@ -33,5 +33,4 @@ jobs:
       - name: Publish to Open VSX
         env:
           OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
-        run: |
-          pnpm dlx ovsx publish *.vsix -p "$OPEN_VSX_TOKEN"
+        run: pnpm dlx ovsx publish *.vsix -p "$OPEN_VSX_TOKEN"
