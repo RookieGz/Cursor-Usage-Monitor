@@ -1,0 +1,30 @@
+name: Publish to Open VSX
+
+on:
+  push:
+    tags:
+      - 'v*'   # 例如 v0.0.4
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build VSIX
+        run: npx vsce package
+
+      - name: Publish to Open VSX
+        env:
+          OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
+        run: |
+          npx ovsx publish *.vsix -p "$OPEN_VSX_TOKEN"
