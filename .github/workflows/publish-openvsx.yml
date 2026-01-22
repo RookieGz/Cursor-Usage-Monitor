@@ -16,15 +16,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        run: corepack enable
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build VSIX
-        run: npx vsce package
+        run: pnpm exec vsce package
 
       - name: Publish to Open VSX
         env:
           OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
         run: |
-          npx ovsx publish *.vsix -p "$OPEN_VSX_TOKEN"
+          pnpm dlx ovsx publish *.vsix -p "$OPEN_VSX_TOKEN"
